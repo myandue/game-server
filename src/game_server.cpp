@@ -19,6 +19,17 @@
 #include <vector>
 #include <mutex>
 
+enum PacketType : uint16_t {
+    PKT_TICK = 1, // 서버 -> 클라: 지금 몇 tick 째인지
+    PKT_MOVE = 2, // 클라 -> 서버: client의 이동 수신
+    PKT_SNAPSHOT = 3, // 서버 -> 클라: 모든 플레이어의 좌표
+};
+
+// 상수 설정
+const int WORLD_MIN = 0;
+const int WORLD_MAX = 100;
+const int MAX_STEP = 1; // 한 tick 최대 이동량 (±1)
+
 // uint16을 빅엔디안 2바이트로 buf 끝에 붙이기
 void put_u16(std::string& buf, uint16_t v) {
     buf.push_back((v >> 8) & 0xFF); // 상위 바이트 먼저
@@ -58,12 +69,6 @@ struct Client {
     int y;
 };
 std::unordered_map<int, Client> clients;
-
-enum PacketType : uint16_t {
-    PKT_TICK = 1, // 서버 -> 클라: 지금 몇 tick 째인지
-    PKT_MOVE = 2, // 클라 -> 서버: client의 이동 수신
-    PKT_SNAPSHOT = 3, // 서버 -> 클라: 모든 플레이어의 좌표
-};
 
 int epfd = epoll_create1(0); // 장부 개설
 
@@ -235,8 +240,17 @@ int main() {
                                     int8_t dx = (int8_t)payload[0];
                                     int8_t dy = (int8_t)payload[1];
 
+                                    // 이상값 거부
+                                    if (dx < -MAX_STEP || dx > MAX_STEP || dy < -MAX_STEP || dy > MAX_STEP) continue;
+
                                     c.x += dx;
                                     c.y += dy;
+
+                                    // 세계보다 크거나 작을 경우 세계 사이즈 적용
+                                    if (c.x > WORLD_MAX) c.x = WORLD_MAX;
+                                    if (c.x < WORLD_MIN) c.x = WORLD_MIN;
+                                    if (c.y > WORLD_MAX) c.y = WORLD_MAX;
+                                    if (c.y < WORLD_MIN) c.y = WORLD_MIN;
                                 }
                             }
                         }
