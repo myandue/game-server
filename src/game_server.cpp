@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -29,6 +30,7 @@ enum PacketType : uint16_t {
 const int WORLD_MIN = 0;
 const int WORLD_MAX = 100;
 const int MAX_STEP = 1; // 한 tick 최대 이동량 (±1)
+const int VIEW = 20; // 유저의 반경 
 
 // uint16을 빅엔디안 2바이트로 buf 끝에 붙이기
 void put_u16(std::string& buf, uint16_t v) {
@@ -140,34 +142,32 @@ int main() {
                 (void) n; // n으로 안받아도 되는데, read는 반환값을 받지 않고, 처리하지 않으면 경고를 발생시킴.
                 // read의 두번째 인자는 주소값이어야하는데, expirations의 경우 값 하나짜리(uint64_t)라서 주소형태('&')로 받는다.
 
-                // 초기화는 이 줄에 도달했을 때 딱 한 번
+                // 초기화는 이 줄에 처음 도달했을 때 딱 한 번
                 static uint32_t tick = 0;
 
-                // --- 모든 클라이언트의 위치 스냅샷 생성
-                std::string payload;
-                
-                // 1) 클라이언트 수
-                int client_cnt = clients.size();
-                put_u16(payload, client_cnt);
+                for (auto& [rfd, recipient] : clients) { // 받는 사람마다 전용 payload 새로 만들기
+                    // payload 처음에 cnt가 들어가야해서, payload_tmp를 먼저 만들기
+                    int client_cnt = 0;
+                    std::string payload_tmp;
 
-                // 2) clients 순회하면서 [id:4][x:4][y:4]로 받기
-                for (auto& [cfd, client] : clients) {
-                    put_u32(payload, cfd);
-                    put_u32(payload, client.x);
-                    put_u32(payload, client.y);
-                }
+                    // clients 순회하면서 [id:4][x:4][y:4]로 받기
+                    for (auto& [cfd, client] : clients) { // 주변 유저 체크
+                        if (abs(client.x - recipient.x) <= VIEW && abs(client.y - recipient.y) <= VIEW) {
+                            put_u32(payload_tmp, cfd);
+                            put_u32(payload_tmp, client.x);
+                            put_u32(payload_tmp, client.y);
+                            client_cnt +=1;
+                        }
+                    }
 
-                // 3) 완성 패킷: [length][type][payload]
-                std::string pkt = make_packet(PKT_SNAPSHOT, payload);
+                    std::string payload;
+                    put_u16(payload, client_cnt);
+                    payload += payload_tmp;
 
-                // 4) 접속한 모두에게 전송
-                for (auto& [cfd, client] : clients) {
-                    // write(int fd, const void* buf, size_t count);
-                    // 두번째인자: 바이트 시작 주소, 세번째인자: 몇 바이트
-                    ssize_t w =write(cfd, pkt.data(), pkt.size());
+                    std::string pkt = make_packet(PKT_SNAPSHOT, payload);
+
+                    ssize_t w = write(rfd, pkt.data(), pkt.size());
                     (void) w;
-                    // pkt: string 객체, pkt.data(): 해당 문자열의 실제 바이트 배열의 첫 주소를 돌려줌
-                    // pkt.size(): 그 바이트가 몇 개인지
                 }
 
                 tick++;
