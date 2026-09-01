@@ -15,6 +15,7 @@
 
 #include <csignal>
 #include <unordered_map>
+#include <map>
 #include <string>
 #include <queue>
 #include <vector>
@@ -71,6 +72,9 @@ struct Client {
     int y;
 };
 std::unordered_map<int, Client> clients;
+
+// 버킷
+std::map<std::pair<int, int>, std::vector<int>> buckets; // <x, y> - 버킷 좌표 / vector<int> - 해당 버킷의 fd 리스트
 
 int epfd = epoll_create1(0); // 장부 개설
 
@@ -145,18 +149,38 @@ int main() {
                 // 초기화는 이 줄에 처음 도달했을 때 딱 한 번
                 static uint32_t tick = 0;
 
+                // 각 client의 버킷 위치 체크
+                buckets.clear();
+                for (auto& [cfd, client]: clients) {
+                    int bx = client.x / VIEW;
+                    int by = client.y / VIEW;
+                    buckets[{bx, by}].push_back(cfd);
+                }
+
                 for (auto& [rfd, recipient] : clients) { // 받는 사람마다 전용 payload 새로 만들기
                     // payload 처음에 cnt가 들어가야해서, payload_tmp를 먼저 만들기
                     int client_cnt = 0;
                     std::string payload_tmp;
 
-                    // clients 순회하면서 [id:4][x:4][y:4]로 받기
-                    for (auto& [cfd, client] : clients) { // 주변 유저 체크
-                        if (abs(client.x - recipient.x) <= VIEW && abs(client.y - recipient.y) <= VIEW) {
-                            put_u32(payload_tmp, cfd);
-                            put_u32(payload_tmp, client.x);
-                            put_u32(payload_tmp, client.y);
-                            client_cnt +=1;
+                    // 수신자의 버킷 위치 
+                    int rbx = recipient.x / VIEW;
+                    int rby = recipient.y / VIEW;
+
+                    // 주변 버킷만 순회 (9개)
+                    for (int ddx = -1 ; ddx <= 1; ddx++) { // 왼쪽으로 한칸 ~ 오른쪽으로 한칸
+                        for (int ddy = -1 ; ddy <= 1; ddy++) { // 위로 한칸 ~ 밑으로 한칸
+                            auto it = buckets.find({rbx+ddx, rby+ddy}); // 이터레이터(map 안의 원소 하나를 가리키는 포인터 같은 것)
+                            if (it == buckets.end()) continue; // 버킷 없음 의미. 그 버킷 비었으면 건너뜀.
+
+                            for (int cfd: it -> second) { // 해당 버킷에 해당하는 fd 리스트 순회
+                                Client& client = clients[cfd];
+                                if (abs(client.x - recipient.x) <= VIEW && abs(client.y - recipient.y) <= VIEW) {
+                                    put_u32(payload_tmp, cfd);
+                                    put_u32(payload_tmp, client.x);
+                                    put_u32(payload_tmp, client.y);
+                                    client_cnt +=1;
+                                }
+                            }
                         }
                     }
 
