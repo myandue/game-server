@@ -138,6 +138,7 @@ int main() {
                 uint64_t expirations;
                 ssize_t n = read(timer_fd, &expirations, sizeof(expirations));
                 (void) n; // n으로 안받아도 되는데, read는 반환값을 받지 않고, 처리하지 않으면 경고를 발생시킴.
+                // read의 두번째 인자는 주소값이어야하는데, expirations의 경우 값 하나짜리(uint64_t)라서 주소형태('&')로 받는다.
 
                 // 초기화는 이 줄에 도달했을 때 딱 한 번
                 static uint32_t tick = 0;
@@ -243,14 +244,26 @@ int main() {
                                     // 이상값 거부
                                     if (dx < -MAX_STEP || dx > MAX_STEP || dy < -MAX_STEP || dy > MAX_STEP) continue;
 
-                                    c.x += dx;
-                                    c.y += dy;
+                                    int nx = c.x + dx;
+                                    int ny = c.y + dy;
 
                                     // 세계보다 크거나 작을 경우 세계 사이즈 적용
-                                    if (c.x > WORLD_MAX) c.x = WORLD_MAX;
-                                    if (c.x < WORLD_MIN) c.x = WORLD_MIN;
-                                    if (c.y > WORLD_MAX) c.y = WORLD_MAX;
-                                    if (c.y < WORLD_MIN) c.y = WORLD_MIN;
+                                    if (nx > WORLD_MAX) nx = WORLD_MAX;
+                                    if (nx < WORLD_MIN) nx = WORLD_MIN;
+                                    if (ny > WORLD_MAX) ny = WORLD_MAX;
+                                    if (ny < WORLD_MIN) ny = WORLD_MIN;
+
+                                    // 다른 유저와 충돌 체크 (이미 그 위치에 유저 존재하는지)
+                                    for (auto& [cfd, client] : clients) {
+                                        if (client.x == nx && client.y == ny) {
+                                            nx = c.x;
+                                            ny = c.y;
+                                            break;
+                                        }
+                                    }
+
+                                    c.x = nx;
+                                    c.y = ny;
                                 }
                             }
                         }

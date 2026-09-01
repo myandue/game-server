@@ -1,3 +1,5 @@
 game
 *.o
 *.out
+client
+game_server
