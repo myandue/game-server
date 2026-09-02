@@ -25,6 +25,7 @@ enum PacketType : uint16_t {
     PKT_TICK = 1, // 서버 -> 클라: 지금 몇 tick 째인지
     PKT_MOVE = 2, // 클라 -> 서버: client의 이동 수신
     PKT_SNAPSHOT = 3, // 서버 -> 클라: 모든 플레이어의 좌표
+    PKT_DELTA = 4, // 서버 -> 클라: 받는 플레이어 기준에서 변화한 플레이어의 좌표
 };
 
 // 상수 설정
@@ -75,6 +76,9 @@ std::unordered_map<int, Client> clients;
 
 // 버킷
 std::map<std::pair<int, int>, std::vector<int>> buckets; // <x, y> - 버킷 좌표 / vector<int> - 해당 버킷의 fd 리스트
+
+// 델타 - 마지막으로 받은 주변 플레이어 정보
+std::map<int, std::map<int, std::pair<int, int>>> last_sent; // key - 받는 사람 fd / value: map<int, pair> - key(주변 플레이어 fd) & value(해당 플레이어 좌표)
 
 int epfd = epoll_create1(0); // 장부 개설
 
@@ -158,9 +162,8 @@ int main() {
                 }
 
                 for (auto& [rfd, recipient] : clients) { // 받는 사람마다 전용 payload 새로 만들기
-                    // payload 처음에 cnt가 들어가야해서, payload_tmp를 먼저 만들기
-                    int client_cnt = 0;
-                    std::string payload_tmp;
+                    // 현재 rfd의 주변 유저 좌표 담을 map
+                    std::map<int, std::pair<int, int>> cur;
 
                     // 수신자의 버킷 위치 
                     int rbx = recipient.x / VIEW;
@@ -175,23 +178,55 @@ int main() {
                             for (int cfd: it -> second) { // 해당 버킷에 해당하는 fd 리스트 순회
                                 Client& client = clients[cfd];
                                 if (abs(client.x - recipient.x) <= VIEW && abs(client.y - recipient.y) <= VIEW) {
-                                    put_u32(payload_tmp, cfd);
-                                    put_u32(payload_tmp, client.x);
-                                    put_u32(payload_tmp, client.y);
-                                    client_cnt +=1;
+                                    cur[cfd] = {client.x, client.y};
                                 }
                             }
                         }
                     }
 
+                    // last_sent와 cur 비교
+                    int client_cnt = 0;
                     std::string payload;
+                    std::string removed_payload_tmp;
+                    std::string changed_payload_tmp;
+
+                    std::map<int, std::pair<int, int>> last = last_sent[rfd];
+                    
+                    // removed
+                    for (auto& [cfd, pos] : last) {
+                        auto it = cur.find(cfd);
+                        if (it == cur.end()) { // 사라짐
+                            put_u32(removed_payload_tmp, cfd);
+                            client_cnt += 1;
+                        }
+                    }
+                    
                     put_u16(payload, client_cnt);
-                    payload += payload_tmp;
+                    payload += removed_payload_tmp;
+                    client_cnt = 0;
+                    
+                    // changed
+                    for (auto& [cfd, pos] : cur) {
+                        auto it = last.find(cfd);
+                        if (it == last.end() || it -> second != pos) { // 새로 들어옴 or 움직임
+                            put_u32(changed_payload_tmp, cfd);
+                            put_u32(changed_payload_tmp, pos.first);
+                            put_u32(changed_payload_tmp, pos.second);
+                            client_cnt += 1;
+                        }
+                    }
+                    
+                    put_u16(payload, client_cnt);
+                    payload += changed_payload_tmp;
+                    client_cnt = 0;
 
-                    std::string pkt = make_packet(PKT_SNAPSHOT, payload);
-
+                    // 패킷 완성해서 전송
+                    std::string pkt = make_packet(PKT_DELTA, payload);
                     ssize_t w = write(rfd, pkt.data(), pkt.size());
                     (void) w;
+
+                    // last_sent 갱신
+                    last_sent[rfd] = cur;
                 }
 
                 tick++;
@@ -296,6 +331,9 @@ int main() {
                     if (closed) {
                         if (clients.count(fd)) {
                             clients.erase(fd);
+                        }
+                        if (last_sent.count(fd)) {
+                            last_sent.erase(fd);
                         }
                         epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
                         close(fd);
