@@ -16,6 +16,7 @@ enum PacketType : uint16_t {
     PKT_TICK = 1,
     PKT_MOVE = 2,
     PKT_SNAPSHOT = 3,
+    PKT_DELTA = 4,
 };
 
 void put_u16(std::string& buf, uint16_t v) {
@@ -131,15 +132,42 @@ int main() {
                     recv_buf.erase(0, 4 + length);
 
                     // 처리 - 모든 유저의 위치값 받기
-                    if (type == PKT_SNAPSHOT) {
-                        clients.clear();
-                        int client_cnt = get_u16(payload, 0);
+                    // if (type == PKT_SNAPSHOT) {
+                    //     clients.clear();
+                    //     int client_cnt = get_u16(payload, 0);
 
-                        for (int i = 0 ; i < client_cnt ; i++) {
-                            int j = 3*i;
-                            int id = get_u32(payload, 4*j + 2);
-                            int x = get_u32(payload, 4*(j+1) + 2);
-                            int y = get_u32(payload, 4*(j+2) + 2);
+                    //     for (int i = 0 ; i < client_cnt ; i++) {
+                    //         int j = 3*i;
+                    //         int id = get_u32(payload, 4*j + 2);
+                    //         int x = get_u32(payload, 4*(j+1) + 2);
+                    //         int y = get_u32(payload, 4*(j+2) + 2);
+
+                    //         clients[id] = Client{.x = x, .y = y};
+                    //     }
+                    // }
+
+                    // 처리 - 값이 변한 유저의 위치값 받기 (or 제거)
+                    if (type == PKT_DELTA) {
+                        int off = 0; // 오프셋
+
+                        int removed_cnt = get_u16(payload, off);
+                        off += 2;
+                        for (int i = 0 ; i < removed_cnt ; i++) {
+                            int id = get_u32(payload, off);
+                            off += 4;
+
+                            clients.erase(id);
+                        }
+
+                        int changed_cnt = get_u16(payload, off);
+                        off += 2;
+                        for (int i = 0 ; i < changed_cnt ; i++) {
+                            int id = get_u32(payload, off);
+                            off += 4;
+                            int x = get_u32(payload, off);
+                            off += 4;
+                            int y = get_u32(payload, off);
+                            off += 4;
 
                             clients[id] = Client{.x = x, .y = y};
                         }
