@@ -3,3 +3,5 @@ game
 *.out
 client
 game_server
+bench/game_server_bench
+bench/bot
