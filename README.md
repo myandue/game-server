@@ -5,6 +5,7 @@
 
 ## 데모
 ![demo](docs/demo.gif)
+- 회색 큐브는 플레이어와 봇, 시야 밖으로 나가면 사라지는 것이 AOI
 
 ## 기술 스택
 - C++17, Linux (epoll, timerfd)
